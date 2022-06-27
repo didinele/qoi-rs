@@ -25,6 +25,7 @@ impl QoiFile {
         Ok(())
     }
 
+    // End of the data stream is marked by 7 0x00 bytes, followed by a single 0x01 byte.
     fn read_all_data(iter: &mut impl Iterator<Item = u8>) -> eyre::Result<Vec<u8>> {
         let mut data: Vec<u8> = vec![];
         let mut chained_null_bytes = 0;
@@ -49,7 +50,7 @@ impl QoiFile {
         }
     }
 
-    fn get_ops(data: Vec<u8>) -> eyre::Result<Vec<QoiOp>> {
+    fn parse_ops(data: Vec<u8>) -> eyre::Result<Vec<QoiOp>> {
         let ref mut iter = data.into_iter();
         let mut ops: Vec<QoiOp> = vec![];
 
@@ -86,6 +87,7 @@ impl QoiFile {
                             let db = (byte >> 4) & 0b11;
 
                             ops.push(QoiOp::Diff(QoiOpDiff {
+                                // These all have a bias of 2
                                 diff: RGBPixel {
                                     r: dr - 2,
                                     g: dg - 2,
@@ -96,6 +98,7 @@ impl QoiFile {
 
                         // QOI_OP_LUMA - remaining 6 bits of current byte are dg, next byte is dr - dg and db - dg, 4 bits each
                         0b10 => {
+                            // The green channel has a bias of 32, while the others have a bias of 8
                             let dg = byte - 32;
                             let next_byte = read_next_u8(iter)?;
 
@@ -119,13 +122,12 @@ impl QoiFile {
                         // QOI_OP_RUN - remaining 6 bits of current byte are the run length
                         0b11 => {
                             ops.push(QoiOp::Run(QoiOpRun {
+                                // This has a bias of -1
                                 run_length: byte + 1,
                             }));
                         }
 
-                        op => {
-                            return Err(eyre::eyre!("Unknown op code: {}", op));
-                        }
+                        op => return Err(eyre::eyre!("Unknown op code: {}", op)),
                     }
                 }
             }
@@ -139,7 +141,7 @@ impl QoiFile {
 
         let header = QoiHeader::new(iter)?;
         let data = QoiFile::read_all_data(iter)?;
-        let ops = QoiFile::get_ops(data)?;
+        let ops = QoiFile::parse_ops(data)?;
 
         Ok(Self { header, ops })
     }
